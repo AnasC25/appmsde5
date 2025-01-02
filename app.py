@@ -1,10 +1,17 @@
+import os
 import pickle
 import streamlit as st
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
-# Charger le modèle DBSCAN
-with open('dbscan_model.pkl', 'rb') as file:
-    dbscan = pickle.load(file)
+# Vérifier si le fichier modèle existe avant de le charger
+if not os.path.exists('dbscan_model.pkl'):
+    st.error("Le fichier 'dbscan_model.pkl' est introuvable.")
+else:
+    # Charger le modèle DBSCAN
+    with open('dbscan_model.pkl', 'rb') as file:
+        dbscan = pickle.load(file)
+    st.success("Modèle DBSCAN chargé avec succès.")
 
 # Titre de l'application
 st.title("Détection de Fraude")
@@ -17,7 +24,12 @@ if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
 
     # Vérifiez que les colonnes nécessaires existent
-    if all(col in data.columns for col in ["TransactionAmount", "TransactionDate", "LoginAttempts"]):
+    required_columns = ["TransactionAmount", "TransactionDate"]
+    if all(col in data.columns for col in required_columns):
+        # Vérifiez si les colonnes facultatives sont présentes avant de les afficher
+        optional_columns = ["AccountID", "TransactionID", "LoginAttempts"]
+        missing_optional_columns = [col for col in optional_columns if col not in data.columns]
+
         # Convertir TransactionDate en format datetime
         data["TransactionDate"] = pd.to_datetime(data["TransactionDate"])
 
@@ -26,27 +38,27 @@ if uploaded_file is not None:
 
         # Appliquer le modèle sur les colonnes pertinentes
         X = data[["TransactionAmount", "Durée"]]
-        data["Cluster"] = dbscan.fit_predict(X)
+
+        # Normaliser et standardiser les données
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Utiliser DBSCAN pour prédire les clusters
+        data["Cluster"] = dbscan.fit_predict(X_scaled)
 
         # Déterminer les transactions frauduleuses par DBSCAN
         data["Statut_DBSCAN"] = data["Cluster"].apply(lambda x: "Frauduleuse" if x == -1 else "Valide")
 
-        # Vérifier LoginAttempts
-        mean_login_attempts = 1.125152
-        data["Statut_Login"] = data["LoginAttempts"].apply(
-            lambda x: "Frauduleuse" if x > mean_login_attempts else "Valide"
-        )
-
-        # Combiner les statuts
-        data["Statut"] = data.apply(
-            lambda row: "Frauduleuse" if row["Statut_DBSCAN"] == "Frauduleuse" or row["Statut_Login"] == "Frauduleuse"
-            else "Valide",
-            axis=1,
-        )
+        # Combiner les statuts (si d'autres critères étaient présents, comme LoginAttempts)
+        data["Statut"] = data["Statut_DBSCAN"]
 
         # Affichage des résultats
         st.subheader("Aperçu des résultats")
-        st.write(data[["TransactionAmount", "TransactionDate", "Durée", "LoginAttempts", "Cluster", "Statut"]].head())
+        display_columns = ["TransactionAmount", "TransactionDate", "Durée", "Cluster", "Statut"]
+        for col in optional_columns:
+            if col in data.columns:
+                display_columns.insert(0, col)
+        st.write(data[display_columns].head())
 
         # Téléchargement des résultats
         st.subheader("Télécharger les résultats")
@@ -58,6 +70,6 @@ if uploaded_file is not None:
             mime="text/csv"
         )
     else:
-        st.error("Le fichier doit contenir les colonnes 'TransactionAmount', 'TransactionDate' et 'LoginAttempts'.")
+        st.error(f"Le fichier doit contenir les colonnes suivantes : {', '.join(required_columns)}.")
 else:
     st.write("Veuillez télécharger un fichier CSV contenant vos données de transactions.")
